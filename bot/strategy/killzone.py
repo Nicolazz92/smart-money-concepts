@@ -10,6 +10,9 @@ KILLZONES: dict[str, tuple[str, str]] = {
     "New York kill zone": ("11:00", "14:00"),
     "London close kill zone": ("14:00", "16:00"),
     "Asian kill zone": ("00:00", "04:00"),
+    # MOEX main trading session: 10:00–18:00 MSK. Moscow has no DST, so
+    # MSK = UTC+3 year-round, meaning the window in UTC is constant.
+    "MOEX main session": ("07:00", "15:00"),
 }
 
 

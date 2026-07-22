@@ -11,11 +11,26 @@ logger = logging.getLogger(__name__)
 # Approximate pip values per symbol (used only for display).
 _PIP_SIZE = {
     "XAUUSD": 0.1,      # gold: 1 pip = 0.1
+    # MOEX shares — chosen so that 1 pip ≈ 1 basis point of typical price
+    # move. These drive the sl_buffer_pips setting in strategy config.
+    "SBER": 0.01,       # ~100 RUB
+    "GAZP": 0.01,       # ~150 RUB
+    "GMKN": 0.1,        # ~7000 RUB (large price)
+    "ROSN": 0.01,       # ~250 RUB
+    "LKOH": 0.1,        # ~1900 RUB (large price)
+    "IMOEX": 0.01,      # index points (~3000)
 }
 _DEFAULT_PIP = 0.0001   # forex majors: 1 pip = 0.0001
 
 
 def _pip_size(symbol: str) -> float:
+    # Crypto perp / spot on Bybit — derive pip from symbol suffix.
+    # "BTCUSDT" -> 0.01, "ETHUSDT" -> 0.01, "1000PEPEUSDT" -> 0.0001
+    # (The "1000" prefix tokens are scaled; underlying is divided by 1000.)
+    if symbol.endswith("USDT") or symbol.endswith("PERP"):
+        if symbol.startswith("1000"):
+            return 0.0001
+        return 0.01
     return _PIP_SIZE.get(symbol, _DEFAULT_PIP)
 
 
@@ -92,8 +107,24 @@ def calculate_trade(
     # Risk:Reward
     # ------------------------------------------------------------------
     risk = abs(entry - sl)
+    # Minimum risk guard: if OB zone is near-zero width (data noise /split-adjusted),
+    # SL becomes ~equal to entry → absurd R:R (e.g. 720:1).
+    # Force a minimum risk of 5 pips to keep R:R realistic.
+    min_risk = 5 * pip
+    if risk < min_risk:
+        # Widen SL to enforce minimum risk
+        if bias_direction == 1:
+            sl = entry - min_risk
+        else:
+            sl = entry + min_risk
+        risk = min_risk
     rr1 = round(abs(tp1 - entry) / risk, 1) if tp1 and risk > 0 else None
     rr2 = round(abs(tp2 - entry) / risk, 1) if tp2 and risk > 0 else None
+    # Cap R:R at 20:1 — anything higher is data noise, not real edge
+    if rr1 is not None and rr1 > 20:
+        rr1 = 20.0
+    if rr2 is not None and rr2 > 20:
+        rr2 = 20.0
 
     trade = {
         "symbol": symbol,

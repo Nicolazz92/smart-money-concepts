@@ -1,0 +1,16 @@
+{
+  "venue": "moex",
+  "oos_months": 1,
+  "wf_total_return_pct": 24120.19,
+  "baseline_total_return_pct": 184184.08,
+  "wf_total_rr": 707.16,
+  "baseline_total_rr": 803.56,
+  "edge_retention_pct": 88.0,
+  "wf_win_rate": 83.8,
+  "baseline_win_rate": 82.3,
+  "wf_expectancy": 1.6639,
+  "baseline_expectancy": 1.0032,
+  "avg_is_expectancy": 2.1325,
+  "avg_oos_expectancy": 1.38,
+  "oos_is_ratio_pct": 64.7
+}

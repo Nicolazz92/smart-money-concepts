@@ -1,0 +1,25 @@
+{
+  "venue": "bybit",
+  "tickers": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BTCPERP",
+    "SOLUSDT",
+    "ZECUSDT",
+    "LTCUSDT",
+    "HYPEUSDT"
+  ],
+  "oos_months": 3,
+  "step_months": 1,
+  "n_steps": 29,
+  "grid_size": 9,
+  "total_oos_signals": 787,
+  "decided": 782,
+  "wins": 488,
+  "losses": 294,
+  "win_rate": 62.4,
+  "total_oos_rr": 430.31,
+  "avg_oos_expectancy": 0.5503,
+  "avg_is_expectancy": 0.6829,
+  "elapsed_seconds": 11589.9
+}

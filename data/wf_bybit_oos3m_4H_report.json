@@ -1,0 +1,16 @@
+{
+  "venue": "bybit",
+  "oos_months": 3,
+  "wf_total_return_pct": 1220.75,
+  "baseline_total_return_pct": 432.75,
+  "wf_total_rr": 444.24,
+  "baseline_total_rr": 172.24,
+  "edge_retention_pct": 257.9,
+  "wf_win_rate": 88.3,
+  "baseline_win_rate": 86.9,
+  "wf_expectancy": 1.0862,
+  "baseline_expectancy": 1.1878,
+  "avg_is_expectancy": 1.2285,
+  "avg_oos_expectancy": 1.2304,
+  "oos_is_ratio_pct": 100.2
+}

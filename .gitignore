@@ -8,3 +8,23 @@ __pycache__
 # Bot
 .env
 bot/data/*.db
+
+# Large data files — keep code only in git, data downloaded separately.
+# See scripts/download_moex.py / scripts/download_bybit.py to regenerate.
+data/*.csv
+data/*.json.gz
+data/_*.json
+data/_*.log
+data/.wf_*_ckpt.json
+data/redo_backup/
+
+# Logs (any location)
+*.log
+/tmp/
+
+# OS/editor noise
+*.swp
+*.bak
+.idea/
+.vscode/
+*.code-workspace

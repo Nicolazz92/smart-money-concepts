@@ -57,6 +57,7 @@ class BacktestResult:
     diag_obs_in_confluence: int = 0      # OBs matching the bias direction
     diag_price_returns: int = 0          # price entered an OB zone
     diag_filtered_by_kz: int = 0         # rejected by kill zone filter
+    diag_filtered_by_rr: int = 0         # rejected by min R:R filter
 
     def compute_stats(self) -> None:
         self.total_signals = len(self.signals)

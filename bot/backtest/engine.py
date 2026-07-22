@@ -39,17 +39,34 @@ _BIAS_WINDOW = 200
 
 
 class BacktestEngine:
-    """Run the SMC strategy over a historical date range."""
+    """Run the SMC strategy over a historical date range.
+
+    Realism knobs (default = original SNahary behaviour, idealised):
+      min_rr          : drop signals whose rr1 (entry→TP1 / entry→SL) is below
+                        this threshold. Filters out " TP1 right next to entry"
+                        setups that mechanically inflate win rate.
+      cost_per_trade  : currency units subtracted from every closed trade
+                        (broker commission + half-spread + estimated slippage).
+                        Applied symmetrically: wins shrink, losses grow.
+    """
 
     def __init__(
         self,
         provider: DataProvider,
         strategy: StrategyConfig,
         notifier: TelegramNotifier | None = None,
+        min_rr: float = 0.0,
+        cost_per_trade: float = 0.0,
+        cost_model=None,
     ):
         self.provider = provider
         self.strategy = strategy
         self.notifier = notifier
+        self.min_rr = min_rr
+        self.cost_per_trade = cost_per_trade
+        # CostModel instance (overrides cost_per_trade if set). When None
+        # and cost_per_trade > 0, a simple per-trade RUB cost is applied.
+        self.cost_model = cost_model
 
     # ------------------------------------------------------------------
     def run(
@@ -73,7 +90,7 @@ class BacktestEngine:
         )
 
         all_signals: list[BacktestSignal] = []
-        total_diag = [0, 0, 0, 0]  # obs_found, confluence, returns, filtered
+        total_diag = [0, 0, 0, 0, 0]  # obs_found, confluence, returns, filtered_kz, filtered_rr
 
         for pair in pairs:
             try:
@@ -81,7 +98,7 @@ class BacktestEngine:
                     pair, start_dt, end_dt, lookback, progress_cb
                 )
                 all_signals.extend(signals)
-                for j in range(4):
+                for j in range(5):
                     total_diag[j] += diag[j]
             except Exception as exc:
                 logger.exception("Backtest error for %s", pair)
@@ -98,6 +115,7 @@ class BacktestEngine:
         result.diag_obs_in_confluence = total_diag[1]
         result.diag_price_returns = total_diag[2]
         result.diag_filtered_by_kz = total_diag[3]
+        result.diag_filtered_by_rr = total_diag[4]
         result.compute_stats()
         return result
 
@@ -149,6 +167,7 @@ class BacktestEngine:
         diag_obs_confluence = 0
         diag_price_returns = 0
         diag_filtered_kz = 0
+        diag_filtered_rr = 0
 
         for i, (ts, candle) in enumerate(ob_in_range.iterrows()):
             # Progress
@@ -278,6 +297,16 @@ class BacktestEngine:
                     sl_buffer_pips=self.strategy.sl_buffer_pips,
                 )
 
+                # ── R:R realism filter ──
+                # Drop setups where TP1 is too close to entry (rr1 < min_rr).
+                # This kills the "any touch wins 0.1R" trades that inflate
+                # win rate mechanically. OB is left alive so a better setup
+                # on a later candle can still trigger.
+                rr1 = trade.get("rr1")
+                if rr1 is None or rr1 < self.min_rr:
+                    diag_filtered_rr += 1
+                    continue
+
                 # All signals are recorded. Telegram alert always sent
                 # (bot indicateur — the trader filters via the checklist).
                 trade["signal_time"] = ts  # candle timestamp that touched the OB
@@ -307,14 +336,16 @@ class BacktestEngine:
                 signals.append(sig)
 
         # 4. Resolve outcomes (walk forward to find TP/SL hits)
-        signals = resolve_outcomes(signals, ohlcv_ob_full)
+        signals = resolve_outcomes(signals, ohlcv_ob_full, cost_model=self.cost_model)
 
         wins = sum(1 for s in signals if s.outcome == "WIN_TP1")
         losses = sum(1 for s in signals if s.outcome == "LOSS")
         logger.info(
             "Backtest %s done — %d signals (%d WIN, %d LOSS) | "
-            "Diag: %d OBs, %d confluence, %d returns, %d hors KZ",
+            "Diag: %d OBs, %d confluence, %d returns, %d hors KZ, %d low-RR",
             pair, len(signals), wins, losses,
             diag_obs_found, diag_obs_confluence, diag_price_returns, diag_filtered_kz,
+            diag_filtered_rr,
         )
-        return signals, diag_obs_found, diag_obs_confluence, diag_price_returns, diag_filtered_kz
+        return (signals, diag_obs_found, diag_obs_confluence,
+                diag_price_returns, diag_filtered_kz, diag_filtered_rr)
