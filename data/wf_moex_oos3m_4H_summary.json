@@ -22,17 +22,17 @@
     "MGNT",
     "MOEX"
   ],
-  "oos_months": 1,
+  "oos_months": 3,
   "step_months": 1,
-  "n_steps": 39,
+  "n_steps": 37,
   "grid_size": 9,
-  "total_oos_signals": 260,
-  "decided": 240,
-  "wins": 215,
-  "losses": 25,
-  "win_rate": 89.58,
-  "total_oos_rr": 326.69,
-  "avg_oos_expectancy": 1.3612,
-  "avg_is_expectancy": 1.4654,
-  "elapsed_seconds": 3185.8
+  "total_oos_signals": 858,
+  "decided": 836,
+  "wins": 695,
+  "losses": 141,
+  "win_rate": 83.13,
+  "total_oos_rr": 987.48,
+  "avg_oos_expectancy": 1.1812,
+  "avg_is_expectancy": 1.4717,
+  "elapsed_seconds": 3089.0
 }

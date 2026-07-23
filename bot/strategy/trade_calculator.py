@@ -109,8 +109,8 @@ def calculate_trade(
     risk = abs(entry - sl)
     # Minimum risk guard: if OB zone is near-zero width (data noise /split-adjusted),
     # SL becomes ~equal to entry → absurd R:R (e.g. 720:1).
-    # Force a minimum risk of 5 pips to keep R:R realistic.
-    min_risk = 5 * pip
+    # Use RELATIVE minimum (0.5% of price) to handle all asset classes correctly.
+    min_risk = max(5 * pip, entry * 0.005)  # at least 0.5% of price
     if risk < min_risk:
         # Widen SL to enforce minimum risk
         if bias_direction == 1:

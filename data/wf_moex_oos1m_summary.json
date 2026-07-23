@@ -26,13 +26,13 @@
   "step_months": 1,
   "n_steps": 39,
   "grid_size": 9,
-  "total_oos_signals": 432,
-  "decided": 425,
-  "wins": 356,
-  "losses": 69,
-  "win_rate": 83.76,
-  "total_oos_rr": 707.16,
-  "avg_oos_expectancy": 1.6639,
-  "avg_is_expectancy": 2.1325,
-  "elapsed_seconds": 25912.6
+  "total_oos_signals": 410,
+  "decided": 403,
+  "wins": 337,
+  "losses": 66,
+  "win_rate": 83.62,
+  "total_oos_rr": 470.34,
+  "avg_oos_expectancy": 1.1671,
+  "avg_is_expectancy": 1.2526,
+  "elapsed_seconds": 3485.1
 }
