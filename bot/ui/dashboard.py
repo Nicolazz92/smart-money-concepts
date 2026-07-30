@@ -21,24 +21,43 @@ _strategy = StrategyConfig.load()
 _state = BotState()
 _scanner: Scanner | None = None
 
+# Paper trading portfolio
+from ..paper.portfolio import Portfolio
+from ..paper.broker import PaperBroker
+_paper_portfolio = Portfolio(
+    initial_capital=_env.paper_initial_capital,
+    position_pct_long=_env.paper_position_pct_long,
+    position_pct_short=_env.paper_position_pct_short,
+    max_concurrent=_env.paper_max_concurrent,
+    cost_pct=_env.paper_cost_pct,
+)
+_paper_broker = PaperBroker(_paper_portfolio)
+_paper_refresh_funcs: list = []
+
 # Available options
 PAIRS_OPTIONS = [
     "EURUSD", "GBPUSD", "XAUUSD",
     "USDJPY", "GBPJPY", "EURJPY",
     "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+    # FORTS futures
+    "SR", "GZ", "LK", "MM", "RN", "VB", "MX", "Ri", "Si", "GD",
+    # MOEX TQBR shares (top-10)
+    "SBER", "GAZP", "LKOH", "GMKN", "ROSN", "VTBR", "NVTK", "MGNT", "MOEX", "AFKS",
 ]
 BIAS_TF_OPTIONS = ["1H", "4H", "1D"]
-OB_TF_OPTIONS = ["5M", "15M", "30M", "1H"]
+OB_TF_OPTIONS = ["5M", "15M", "30M", "1H", "4H", "60M"]
 TZ_OPTIONS = {
     "UTC": "UTC",
     "Broker (UTC+2/+3 auto DST)": "Europe/Helsinki",
-    "Afrique Est / Nairobi (UTC+3)": "Africa/Nairobi",
+    "Moscow (UTC+3)": "Europe/Moscow",
+    "Afrique East / Nairobi (UTC+3)": "Africa/Nairobi",
 }
 KZ_OPTIONS = [
     "London open kill zone",
     "New York kill zone",
     "London close kill zone",
     "Asian kill zone",
+    "MOEX main session",
 ]
 
 
@@ -173,7 +192,7 @@ def _build_ui() -> None:
                 # --- Data Provider ---
                 ui.label("Data Provider").classes("text-caption text-grey")
                 provider_select = ui.select(
-                    options=["mt5", "oanda"],
+                    options=["mt5", "oanda", "csv", "moex"],
                     value=_env.data_provider,
                     on_change=lambda e: setattr(_env, "data_provider", e.value),
                 ).classes("w-full")
@@ -282,6 +301,7 @@ def _build_ui() -> None:
                 checklist_tab = ui.tab("Checklist")
                 journal_tab = ui.tab("Journal")
                 kz_tab = ui.tab("Kill Zones")
+                paper_tab = ui.tab("Paper Trading")
 
             with ui.tab_panels(tabs, value=live_tab).classes("w-full"):
                 # --- Live tab ---
@@ -338,6 +358,13 @@ def _build_ui() -> None:
                 # --- Kill Zones tab ---
                 with ui.tab_panel(kz_tab):
                     build_killzone_panel(_strategy)
+
+                # --- Paper Trading tab ---
+                with ui.tab_panel(paper_tab):
+                    from .paper_panel import build_paper_panel
+                    _paper_refresh = build_paper_panel(_paper_portfolio)
+                    # Register for periodic refresh
+                    _paper_refresh_funcs.append(_paper_refresh)
 
     # ------------------------------------------------------------------
     # Periodic UI refresh (every 2 seconds)
@@ -428,6 +455,13 @@ def _build_ui() -> None:
             f"Dernier scan : {_scanner.last_scan_time}" if _scanner.last_scan_time else ""
         )
         error_label.set_text(_scanner.last_error)
+
+        # Paper trading refresh
+        for fn in _paper_refresh_funcs:
+            try:
+                fn()
+            except Exception:
+                pass
 
     ui.timer(2.0, refresh_ui)
 

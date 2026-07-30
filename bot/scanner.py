@@ -98,14 +98,22 @@ class Scanner:
     def _fetch_pair_data(self, pair: str):
         """Sync helper — runs inside the dedicated data thread.
         Reconnects automatically if the provider connection dropped."""
-        import MetaTrader5 as mt5
 
-        # Check if MT5 is still alive, reconnect if needed
-        if hasattr(self.provider, '_connected'):
-            info = mt5.account_info()
-            if info is None:
-                logger.warning("MT5 connection lost, reconnecting...")
+        # Generic liveness check — works for all providers
+        if hasattr(self.provider, 'is_alive'):
+            if not self.provider.is_alive():
+                logger.warning("Provider connection lost, reconnecting...")
                 self.provider.connect()
+        elif hasattr(self.provider, '_connected'):
+            # Fallback for MT5 (no is_alive method)
+            try:
+                import MetaTrader5 as mt5
+                info = mt5.account_info()
+                if info is None:
+                    logger.warning("MT5 connection lost, reconnecting...")
+                    self.provider.connect()
+            except ImportError:
+                pass  # Not MT5, skip
 
         ohlcv_bias = self.provider.get_ohlcv(
             pair, self.strategy.bias_timeframe, 200

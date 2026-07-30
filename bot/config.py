@@ -39,6 +39,17 @@ class EnvSettings(BaseSettings):
     data_provider: str = "mt5"
     timezone: str = "Europe/Helsinki"
 
+    # MOEX
+    moex_market: str = "forts"  # "forts" or "shares"
+
+    # Paper trading
+    paper_initial_capital: float = 100000.0  # RUB
+    paper_position_pct_long: float = 100.0
+    paper_position_pct_short: float = 50.0
+    paper_max_concurrent: int = 3
+    paper_cost_pct: float = 0.26  # Finam Strateg round-trip %
+    paper_enabled: bool = True
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
@@ -57,6 +68,7 @@ class StrategyConfig(BaseModel):
         "New York kill zone",
         "London close kill zone",
     ]
+    min_rr: float = 1.5  # minimum R:R for signal (from walk-forward optimisation)
 
     @classmethod
     def load(cls) -> "StrategyConfig":
