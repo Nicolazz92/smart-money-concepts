@@ -1,0 +1,28 @@
+{
+  "venue": "moex",
+  "tickers": [
+    "SR",
+    "GZ",
+    "LK",
+    "MM",
+    "RN",
+    "VB",
+    "MX",
+    "Ri",
+    "Si",
+    "GD"
+  ],
+  "oos_months": 1,
+  "step_months": 1,
+  "n_steps": 39,
+  "grid_size": 9,
+  "total_oos_signals": 242,
+  "decided": 234,
+  "wins": 190,
+  "losses": 44,
+  "win_rate": 81.2,
+  "total_oos_rr": 187.42,
+  "avg_oos_expectancy": 0.8009,
+  "avg_is_expectancy": 0.826,
+  "elapsed_seconds": 23468.3
+}
