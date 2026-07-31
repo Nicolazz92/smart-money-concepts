@@ -1,3 +1,12 @@
+"""Fixed StrategyEvaluator — no lookahead bias, with cost model.
+
+Fixes vs upstream:
+1. Entry on NEXT candle's open (not current candle's close)
+2. TP/SL checked from the candle AFTER entry (not same candle)
+3. Same-candle TP+SL → LOSS (conservative, no tick data)
+4. Cost model: round-trip commission deducted from PnL
+"""
+
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
@@ -20,13 +29,17 @@ SESSION_RANGES = {
     "Asian": (0, 9),
     "London": (8, 17),
     "NewYork": (13, 22),
+    "MOEX": (7, 16),  # MOEX main session 10:00-19:00 MSK = 07:00-16:00 UTC
 }
 
 
 def _is_session(
     candle_time: datetime, session: str, window: Optional[list[int]] = None
 ) -> bool:
-    ranges = SESSION_RANGES.get(session)
+    if window and len(window) == 2:
+        ranges = (window[0], window[1])
+    else:
+        ranges = SESSION_RANGES.get(session)
     if not ranges:
         return False
     h = candle_time.hour
@@ -35,6 +48,19 @@ def _is_session(
 
 
 class StrategyEvaluator:
+    """Evaluate a YAML strategy on candles.
+
+    Fixed version: no lookahead bias, cost-aware.
+
+    Parameters
+    ----------
+    cost_pct : float
+        Round-trip cost as % of position value (e.g. 0.135 for Bybit perp).
+    """
+
+    def __init__(self, cost_pct: float = 0.0):
+        self.cost_pct = cost_pct
+
     def run(
         self,
         strategy: Strategy,
@@ -43,27 +69,40 @@ class StrategyEvaluator:
     ) -> list[Trade]:
         positions: list[_Position] = []
         closed: list[Trade] = []
+        pending_entries: list[tuple[str, int]] = []  # (side, signal_index)
 
         for i in range(len(candles)):
             candle = candles[i]
-            # Check exits first
+
+            # ── Execute pending entries at this candle's open ──
+            if pending_entries and i > 0:
+                for side, sig_idx in pending_entries:
+                    if len(positions) < strategy.risk.max_positions:
+                        pos = self._open_position(
+                            strategy, candle, i, side, indicators, sig_idx
+                        )
+                        if pos:
+                            positions.append(pos)
+                pending_entries.clear()
+
+            # ── Check exits on open positions (from entry_index + 1) ──
             for pos in list(positions):
                 pos.bars_held += 1
-                if self._check_exit(pos, candle, strategy, indicators, i):
-                    if pos.trade.exit_index is not None:
-                        closed.append(pos.trade)
-                        positions.remove(pos)
-                        continue
-                # Check trailing stop
+                if i > pos.entry_index:  # only check AFTER entry candle
+                    if self._check_exit(pos, candle, strategy, indicators, i):
+                        if pos.trade.exit_index is not None:
+                            closed.append(pos.trade)
+                            positions.remove(pos)
+                            continue
+                # Update trailing stop
                 self._update_trailing(pos, candle, strategy)
 
-            # Check entries
-            if len(positions) < strategy.risk.max_positions:
+            # ── Check entries: signal detected on THIS candle, execute on NEXT ──
+            if len(positions) + len(pending_entries) < strategy.risk.max_positions:
                 side = self._check_entry(candle, strategy, indicators, i, candles)
                 if side:
-                    pos = self._open_position(strategy, candle, i, side, indicators)
-                    if pos:
-                        positions.append(pos)
+                    # Queue entry for next candle (no lookahead)
+                    pending_entries.append((side, i))
 
         # Close any remaining positions at last candle
         for pos in positions:
@@ -71,7 +110,7 @@ class StrategyEvaluator:
             pos.trade.exit_time = candles[-1].timestamp
             pos.trade.exit_price = candles[-1].close
             pos.trade.exit_reason = "end_of_data"
-            pos.trade.pnl = _calc_pnl(pos.trade)
+            pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
             pos.trade.status = "closed"
             closed.append(pos.trade)
 
@@ -108,8 +147,10 @@ class StrategyEvaluator:
         idx: int,
         side: str,
         indicators: dict,
+        signal_idx: int,
     ) -> Optional[_Position]:
-        entry_price = candle.close
+        # FIX: entry at candle OPEN (not close) — realistic execution
+        entry_price = candle.open
         if entry_price <= 0:
             return None
 
@@ -121,13 +162,13 @@ class StrategyEvaluator:
                 swings = indicators.get("swings", {})
                 lows = swings.get("Low", [])
                 recent_low = None
-                for i in range(idx, max(idx - 20, -1), -1):
+                for i in range(signal_idx, max(signal_idx - 20, -1), -1):
                     if i < len(lows) and lows[i] is not None and lows[i] != 0:
                         recent_low = lows[i]
                         break
                 sl_price = recent_low * 0.995 if recent_low else candle.low * 0.99
             else:
-                ob_bottom = _last_ob_boundary(indicators, idx, "bottom") or (
+                ob_bottom = _last_ob_boundary(indicators, signal_idx, "bottom") or (
                     candle.low * 0.99
                 )
                 sl_price = ob_bottom
@@ -138,13 +179,13 @@ class StrategyEvaluator:
                 swings = indicators.get("swings", {})
                 highs = swings.get("High", [])
                 recent_high = None
-                for i in range(idx, max(idx - 20, -1), -1):
+                for i in range(signal_idx, max(signal_idx - 20, -1), -1):
                     if i < len(highs) and highs[i] is not None and highs[i] != 0:
                         recent_high = highs[i]
                         break
                 sl_price = recent_high * 1.005 if recent_high else candle.high * 1.01
             else:
-                ob_top = _last_ob_boundary(indicators, idx, "top") or (
+                ob_top = _last_ob_boundary(indicators, signal_idx, "top") or (
                     candle.high * 1.01
                 )
                 sl_price = ob_top
@@ -189,6 +230,12 @@ class StrategyEvaluator:
     ) -> bool:
         self._track_supertrend(pos, indicators, idx)
 
+        # FIX: check TP and SL on same candle → conservative = LOSS
+        tp_hit = False
+        sl_hit = False
+        exit_price_tp = None
+        exit_price_sl = None
+
         for e in strategy.exit_conditions:
             if e.type == "trend_exit":
                 st = indicators.get("supertrend", {})
@@ -203,7 +250,7 @@ class StrategyEvaluator:
                         pos.trade.exit_time = candle.timestamp
                         pos.trade.exit_price = candle.close
                         pos.trade.exit_reason = "supertrend_flip"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
+                        pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
                         pos.trade.status = "closed"
                         return True
                     if (
@@ -215,7 +262,7 @@ class StrategyEvaluator:
                         pos.trade.exit_time = candle.timestamp
                         pos.trade.exit_price = candle.close
                         pos.trade.exit_reason = "ema_exit"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
+                        pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
                         pos.trade.status = "closed"
                         return True
                 else:
@@ -224,7 +271,7 @@ class StrategyEvaluator:
                         pos.trade.exit_time = candle.timestamp
                         pos.trade.exit_price = candle.close
                         pos.trade.exit_reason = "supertrend_flip"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
+                        pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
                         pos.trade.status = "closed"
                         return True
                     if (
@@ -236,7 +283,7 @@ class StrategyEvaluator:
                         pos.trade.exit_time = candle.timestamp
                         pos.trade.exit_price = candle.close
                         pos.trade.exit_reason = "ema_exit"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
+                        pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
                         pos.trade.status = "closed"
                         return True
 
@@ -248,26 +295,16 @@ class StrategyEvaluator:
                         - (pos.trade.entry_price - pos.sl_price) * sl
                     )
                     if candle.low <= exit_sl:
-                        pos.trade.exit_index = idx
-                        pos.trade.exit_time = candle.timestamp
-                        pos.trade.exit_price = exit_sl
-                        pos.trade.exit_reason = "stop_loss"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
-                        pos.trade.status = "closed"
-                        return True
+                        sl_hit = True
+                        exit_price_sl = exit_sl
                 else:
                     exit_sl = (
                         pos.trade.entry_price
                         + (pos.sl_price - pos.trade.entry_price) * sl
                     )
                     if candle.high >= exit_sl:
-                        pos.trade.exit_index = idx
-                        pos.trade.exit_time = candle.timestamp
-                        pos.trade.exit_price = exit_sl
-                        pos.trade.exit_reason = "stop_loss"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
-                        pos.trade.status = "closed"
-                        return True
+                        sl_hit = True
+                        exit_price_sl = exit_sl
 
             if e.type == "target":
                 tp_ratio = e.value
@@ -277,26 +314,43 @@ class StrategyEvaluator:
                         + (pos.trade.entry_price - pos.sl_price) * tp_ratio
                     )
                     if candle.high >= tp_price:
-                        pos.trade.exit_index = idx
-                        pos.trade.exit_time = candle.timestamp
-                        pos.trade.exit_price = tp_price
-                        pos.trade.exit_reason = "target"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
-                        pos.trade.status = "closed"
-                        return True
+                        tp_hit = True
+                        exit_price_tp = tp_price
                 else:
                     tp_price = (
                         pos.trade.entry_price
                         - (pos.sl_price - pos.trade.entry_price) * tp_ratio
                     )
                     if candle.low <= tp_price:
-                        pos.trade.exit_index = idx
-                        pos.trade.exit_time = candle.timestamp
-                        pos.trade.exit_price = tp_price
-                        pos.trade.exit_reason = "target"
-                        pos.trade.pnl = _calc_pnl(pos.trade)
-                        pos.trade.status = "closed"
-                        return True
+                        tp_hit = True
+                        exit_price_tp = tp_price
+
+        # FIX: both TP and SL on same candle → conservative = LOSS
+        if sl_hit and tp_hit:
+            pos.trade.exit_index = idx
+            pos.trade.exit_time = candle.timestamp
+            pos.trade.exit_price = exit_price_sl  # assume SL hit first
+            pos.trade.exit_reason = "stop_loss"
+            pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
+            pos.trade.status = "closed"
+            return True
+        elif sl_hit:
+            pos.trade.exit_index = idx
+            pos.trade.exit_time = candle.timestamp
+            pos.trade.exit_price = exit_price_sl
+            pos.trade.exit_reason = "stop_loss"
+            pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
+            pos.trade.status = "closed"
+            return True
+        elif tp_hit:
+            pos.trade.exit_index = idx
+            pos.trade.exit_time = candle.timestamp
+            pos.trade.exit_price = exit_price_tp
+            pos.trade.exit_reason = "target"
+            pos.trade.pnl = _calc_pnl(pos.trade, self.cost_pct)
+            pos.trade.status = "closed"
+            return True
+
         return False
 
     def _update_trailing(self, pos: _Position, candle: Candle, strategy: Strategy):
@@ -312,13 +366,16 @@ class StrategyEvaluator:
                         pos.sl_price = min(pos.sl_price, candle.low + move * 0.5)
 
 
-def _calc_pnl(trade: Trade) -> float:
+def _calc_pnl(trade: Trade, cost_pct: float = 0.0) -> float:
     if trade.exit_price is None or trade.entry_price == 0:
         return 0.0
     diff = trade.exit_price - trade.entry_price
     if trade.side == "sell":
         diff = -diff
-    return diff * trade.quantity
+    gross_pnl = diff * trade.quantity
+    # Deduct round-trip cost
+    cost = trade.entry_price * trade.quantity * (cost_pct / 100)
+    return gross_pnl - cost
 
 
 def _last_ob_boundary(indicators: dict, idx: int, boundary: str) -> Optional[float]:
@@ -384,7 +441,6 @@ def _evaluate_condition(
     elif cond.type == "liquidity_sweep":
         liq = indicators.get("liquidity", {})
         vals = liq.get("Liquidity", [])
-        levels = liq.get("Level", [])
         if idx < len(vals) and vals[idx] is not None and vals[idx] != 0:
             return cond.direction
 

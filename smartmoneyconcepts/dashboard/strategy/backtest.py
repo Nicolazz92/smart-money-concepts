@@ -10,10 +10,11 @@ from .models import BacktestResult, Strategy, Trade
 
 
 class Backtester:
-    def __init__(self, repo: BaseCandleRepository, indicator_service: IndicatorService):
+    def __init__(self, repo: BaseCandleRepository, indicator_service: IndicatorService, cost_pct: float = 0.0):
         self.repo = repo
         self.indicators = indicator_service
-        self.evaluator = StrategyEvaluator()
+        self.cost_pct = cost_pct
+        self.evaluator = StrategyEvaluator(cost_pct=cost_pct)
 
     def run(
         self,
